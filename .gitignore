@@ -1,0 +1,20 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.envrc
+
+# data / artifacts
+data/
+*.pt
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# OS
+.DS_Store
