@@ -1,93 +1,142 @@
 import os
-from PIL import Image
+import shutil
+from docling.datamodel.document import TextItem, TableItem, PictureItem, SectionHeaderItem
 from src.ingestion.docling_wrapper import DoclingWrapper
-from src.ingestion.page_processor import PageProcessor
-from src.agents.auditor import auditor
 from src.agents.vision import vision_agent
 from src.agents.validator import validator
-from src.agents.fusion import fusion_agent
+from src.core.logger import setup_logger
+
+log = setup_logger("main_pipeline")
 
 class AnalysisPipeline:
     def __init__(self):
         self.ingestor = DoclingWrapper()
-        self.processor = PageProcessor()
+        
+        # DEBUG SETUP
+        self.debug_dir = "data/debug_crops"
+        if os.path.exists(self.debug_dir):
+            shutil.rmtree(self.debug_dir)
+        os.makedirs(self.debug_dir, exist_ok=True)
     
     def run(self, pdf_path: str):
-        print(f"🚀 Starting Context-Aware RAG Pipeline for: {pdf_path}")
+        log.info(f"🚀 [bold]Starting Pure Docling Pipeline (Debug Mode)[/]")
+        log.info(f"📁 Debug images will be saved to: [underline]{self.debug_dir}[/]")
         
         # 1. INGESTION
-        print("\n" + "="*50)
-        print(" PHASE 1: INGESTION & PARSING ")
-        print("="*50)
         try:
             doc_result = self.ingestor.convert_pdf(pdf_path)
-            image_paths = self.processor.save_page_images(doc_result)
         except Exception as e:
-            print(f"❌ Ingestion Failed: {e}")
+            log.critical(f"❌ Ingestion Failed: {e}")
             return
 
-        final_document_markdown = ""
+        final_markdown = ""
+        log.info("\n[bold yellow]🧠 PHASE 2: LINEAR ENHANCEMENT[/]")
 
-        # 2. PAGE LOOP
-        print("\n" + "="*50)
-        print(" PHASE 2: INTELLIGENT PROCESSING ")
-        print("="*50)
-        
-        for page_num, img_path in enumerate(image_paths, start=1):
-            print(f"\n📄 [PAGE {page_num}] Processing...")
+        # 2. LINEAR LOOP
+        for item, text_before, text_after in self.ingestor.iterate_items(doc_result):
             
-            # --- A. Get Page Text ---
-            page_text_content = self.ingestor.get_page_text(doc_result, page_num)
-            text_len = len(page_text_content)
-            print(f"   📝 Extracted {text_len} characters of text.")
+            # --- HEADER ---
+            if isinstance(item, SectionHeaderItem):
+                log.info(f"   🔹 Header: [bold]{item.text[:50]}...[/]")
+                final_markdown += f"\n## {item.text}\n\n"
+                continue
 
-            # --- B. Audit (YOLO) ---
-            elements = auditor.audit_page(img_path, page_num)
-            valid_visuals = []
-            
-            if elements:
-                original_img = Image.open(img_path)
+            # --- TEXT ---
+            if isinstance(item, TextItem):
+                final_markdown += f"{item.text}\n\n"
+                continue
+
+            # --- TABLE ---
+            if isinstance(item, TableItem):
+                log.info(f"   📊 Found [bold]Table[/] on Page {item.prov[0].page_no}")
+                try:
+                    table_md = item.export_to_markdown(doc=doc_result.document)
+                except:
+                    table_md = item.export_to_markdown() 
+                final_markdown += f"\n{table_md}\n\n"
+                continue
+
+            # --- FIGURE/IMAGE ---
+            if isinstance(item, PictureItem):
+                page_no = item.prov[0].page_no
+                log.info(f"   🖼️  Found [bold magenta]Figure[/] on Page {page_no}")
                 
-                for elem in elements:
-                    # --- C. Crop & Analyze ---
-                    bbox = (elem.bbox.x1, elem.bbox.y1, elem.bbox.x2, elem.bbox.y2)
-                    crop_path = f"data/temp_crop_{elem.id}.png"
-                    original_img.crop(bbox).save(crop_path)
+                try:
+                    # 1. Get Image
+                    page_obj = doc_result.pages[page_no]
+                    if hasattr(page_obj.image, "pil_image"):
+                        page_img = page_obj.image.pil_image
+                    else:
+                        page_img = page_obj.image
+
+                    # 2. Coordinate Maths
+                    bbox = item.prov[0].bbox
+                    page_h = page_img.height
+                    page_w = page_img.width
+
+                    # Normalize Check
+                    if bbox.l < 1.0 and bbox.t < 1.0:
+                        pdf_l, pdf_b, pdf_r, pdf_t = bbox.l * page_w, bbox.b * page_h, bbox.r * page_w, bbox.t * page_h
+                    else:
+                        pdf_l, pdf_b, pdf_r, pdf_t = bbox.l, bbox.b, bbox.r, bbox.t
+
+                    # Flip Y-Axis Logic
+                    crop_left = max(0, pdf_l)
+                    crop_right = min(page_w, pdf_r)
+                    crop_top = max(0, page_h - pdf_t)
+                    crop_bottom = min(page_h, page_h - pdf_b)
+
+                    if crop_top > crop_bottom:
+                        crop_top, crop_bottom = crop_bottom, crop_top
+
+                    crop_box = (crop_left, crop_top, crop_right, crop_bottom)
+                    log.info(f"      ✂️  Cropping: {crop_box}")
+
+                    # 3. Save Debug Crop
+                    filename = f"page{page_no}_fig_{int(crop_top)}.png"
+                    debug_path = os.path.join(self.debug_dir, filename)
                     
-                    print(f"   👁️  Analyzing {elem.type.upper()} (Conf: {elem.confidence:.2f})...", end="\r")
+                    # Validate crop size
+                    if (crop_right - crop_left) < 10 or (crop_bottom - crop_top) < 10:
+                         log.warning("      ⚠️ Skipping tiny/invalid crop.")
+                         continue
+
+                    page_img.crop(crop_box).save(debug_path)
+                    log.info(f"      💾 Saved crop to: [cyan]{debug_path}[/]")
                     
-                    # Pass text context to Vision Agent
-                    analysis = vision_agent.analyze_element(crop_path, elem.type, page_text_content)
+                    # 4. Prepare Context
+                    context_str = f"Prev Paragraph: {text_before[:200]}...\nNext Paragraph: {text_after[:200]}..."
                     
-                    # --- D. Validate ---
-                    check = validator.validate(elem.type, elem.confidence, analysis)
+                    # --- LOG INPUT ---
+                    log.info(f"      📝 [bold]Input Context to Gemini:[/]\n[dim]\"{context_str.replace(chr(10), ' ')}\"[/dim]")
+                    
+                    log.info(f"      🤖 Sending to [blue]Gemini VLM[/]...")
+                    
+                    # 5. Call Gemini
+                    analysis = vision_agent.analyze_element(debug_path, "figure", context_str)
+                    
+                    # --- LOG OUTPUT ---
+                    log.info(f"      💡 [bold]Gemini Output:[/]\n[green]{analysis[:300]}... (truncated)[/]")
+
+                    # 6. Validate
+                    check = validator.validate("figure", 1.0, analysis)
                     
                     if check["is_valid"]:
-                        print(f"   ✅ Valid {elem.type.upper()}: {analysis[:60].replace(chr(10), ' ')}...")
-                        valid_visuals.append({
-                            "type": elem.type,
-                            "analysis": analysis
-                        })
+                        final_markdown += f"\n\n> **[Figure Analysis]**\n> {analysis}\n\n"
                     else:
-                        print(f"   🗑️  Dropped {elem.type.upper()}: {check['reason']}")
-                    
-                    if os.path.exists(crop_path): os.remove(crop_path)
-            else:
-                print("   (No visual elements found)")
+                        log.warning(f"      🗑️ [red]Dropped[/]: {check['reason']}")
 
-            # --- E. Fusion ---
-            print("   🔗 Fusing Text & Visuals...")
-            fused_page = fusion_agent.fuse_page(page_num, page_text_content, valid_visuals)
-            final_document_markdown += fused_page + "\n\n"
+                except Exception as e:
+                    log.error(f"      ⚠️ Error processing image: {e}")
+                continue
 
-        # 3. SAVE FINAL OUTPUT
-        output_file = "data/final_rag_document.md"
-        with open(output_file, "w") as f:
-            f.write(final_document_markdown)
-            
-        print("\n" + "="*60)
-        print(f"✅ PIPELINE COMPLETE. Output saved to: {output_file}")
-        print("="*60)
+        # 3. SAVE
+        output_path = "data/final_docling_pure.md"
+        with open(output_path, "w") as f:
+            f.write(final_markdown)
+        
+        log.info(f"✅ PIPELINE COMPLETE.")
+        log.info(f"📁 Output saved to: [underline]{output_path}[/]")
 
 if __name__ == "__main__":
     if os.path.exists("data/test_doc.pdf"):

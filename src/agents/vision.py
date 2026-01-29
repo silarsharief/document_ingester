@@ -2,6 +2,7 @@ import google.generativeai as genai
 from PIL import Image
 from src.core.config import settings
 from src.core.utils import generate_content_with_retry
+import time
 
 class VisionAgent:
     def __init__(self):
@@ -21,8 +22,8 @@ class VisionAgent:
         TASK:
         Analyze the provided {element_type} image.
         
-        CONTEXT FROM DOCUMENT PAGE:
-        \"\"\"{page_context[:2000]}...\"\"\"
+        CONTEXT SURROUNDING THIS IMAGE (Text Before/After):
+        \"\"\"{page_context}\"\"\"
         
         INSTRUCTIONS:
         1. Identify what this {element_type} represents based on the text context.
