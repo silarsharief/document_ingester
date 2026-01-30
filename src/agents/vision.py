@@ -14,31 +14,28 @@ class VisionAgent:
         img = Image.open(image_path)
         
         prompt = f"""
-        You are a Data Extraction Specialist. 
-        Analyze this {element_type} image.
+        You are a Senior Data Analyst. Analyze this {element_type}.
         
-        CONTEXT: 
-        {page_context[:500]}
+        CONTEXT SURROUNDING THIS IMAGE:
+        "{page_context}"
         
         INSTRUCTIONS:
-        1. Identify the core subject.
-        2. If it is a graph/chart/table: Extract the raw numbers into a structured format.
-        3. If it is a diagram/image: List the key components visible.
-        4. Do NOT write paragraphs. Use lists and short sentences.
+        1. Contextualize: Use the provided text to understand *why* this figure exists.
+        2. Interpret: Don't just read numbers. Explain the *trend*, *gap*, or *significance* (e.g., "Mistral outperforms Llama 2 significantly in Reasoning").
+        3. Extract: Get the raw data into a clean structure.
         
         OUTPUT FORMAT (JSON):
         {{
-            "heading": "Short Title (3-5 words)",
+            "heading": "Insightful Title (e.g., 'Performance Gap in Reasoning Tasks')",
             "content": {{
-                "overview": "A single, concise sentence explaining what this is.",
+                "overview": "A detailed analytical summary. Explain what the data implies for the model's capabilities.",
                 "key_findings": [
-                    "Bullet point 1 (Insight or observation)",
-                    "Bullet point 2"
+                    "Insight 1 (e.g., 'Model A is 2x faster than B')",
+                    "Insight 2 (e.g., 'Accuracy drops as batch size increases')"
                 ],
                 "extracted_data": {{
-                    // IF CHART/TABLE: Extract X/Y values, Row/Cols here.
-                    // IF DIAGRAM: Map labels to descriptions.
-                    // Example: "Mistral": "60%", "Llama": "55%"
+                    // Structured data for charts/tables.
+                    // Keep it clean: "Metric": "Value"
                 }}
             }}
         }}
@@ -52,7 +49,7 @@ class VisionAgent:
             return json.loads(text)
         except Exception:
             return {
-                "heading": "Processing Error",
+                "heading": "Analysis Error",
                 "content": {
                     "overview": "Could not analyze image.",
                     "key_findings": [],
