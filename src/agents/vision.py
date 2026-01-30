@@ -14,28 +14,26 @@ class VisionAgent:
         img = Image.open(image_path)
         
         prompt = f"""
-        You are a Senior Data Analyst. Analyze this {element_type}.
+        You are a Senior Data Analyst. Analyze this document element.
         
         CONTEXT SURROUNDING THIS IMAGE:
         "{page_context}"
         
         INSTRUCTIONS:
-        1. Contextualize: Use the provided text to understand *why* this figure exists.
-        2. Interpret: Don't just read numbers. Explain the *trend*, *gap*, or *significance* (e.g., "Mistral outperforms Llama 2 significantly in Reasoning").
-        3. Extract: Get the raw data into a clean structure.
+        1. **Identify**: Is this a Chart, Table, Diagram, or a Logo/Header?
+        2. **Logos/Headers**: If it is a company logo or graphical header, simply state what it says and represents. Do not hallucinate data.
+        3. **Charts/Graphs**: Extract the real data and trends.
         
         OUTPUT FORMAT (JSON):
         {{
-            "heading": "Insightful Title (e.g., 'Performance Gap in Reasoning Tasks')",
+            "heading": "Short Title (e.g., 'Mistral AI Logo' or 'Performance Benchmark')",
             "content": {{
-                "overview": "A detailed analytical summary. Explain what the data implies for the model's capabilities.",
+                "overview": "Clear description of the visual.",
                 "key_findings": [
-                    "Insight 1 (e.g., 'Model A is 2x faster than B')",
-                    "Insight 2 (e.g., 'Accuracy drops as batch size increases')"
+                    "Insight 1 (or 'Company branding detected' for logos)"
                 ],
                 "extracted_data": {{
-                    // Structured data for charts/tables.
-                    // Keep it clean: "Metric": "Value"
+                    // Only for charts/tables. Leave empty for logos.
                 }}
             }}
         }}
@@ -49,9 +47,9 @@ class VisionAgent:
             return json.loads(text)
         except Exception:
             return {
-                "heading": "Analysis Error",
+                "heading": "Visual Element",
                 "content": {
-                    "overview": "Could not analyze image.",
+                    "overview": "Content could not be analyzed.",
                     "key_findings": [],
                     "extracted_data": {}
                 }
