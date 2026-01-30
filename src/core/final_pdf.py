@@ -22,7 +22,6 @@ class FinalReportGenerator:
         story.append(Spacer(1, 0.5*inch))
 
         # --- 1. BUNCH BY PAGE (Grouping) ---
-        # We group items so we can sort each page individually
         pages_bucket = {}
         for item in data:
             p = item.get('page', 1)
@@ -36,20 +35,12 @@ class FinalReportGenerator:
             items = pages_bucket[p_num]
 
             # --- 3. SORT LOGIC (The Fix) ---
-            # Try to identify if we need spatial sorting
-            # If items have a 'bbox', we sort spatially.
-            # Docling Y is Bottom-Left (0 is Bottom, 800 is Top).
-            # We want Top-to-Bottom reading order -> Sort by Y DESCENDING.
-            
-            # Check if bboxes exist
+            # Sort High Y (Header) to Low Y (Footer) -> Reverse=True
             has_bboxes = all('bbox' in x for x in items)
             
             if has_bboxes:
-                # item['bbox'] is [L, B, R, T]. Index 3 is Top Y.
-                # Reverse=True gives High Y (Header) first.
                 items.sort(key=lambda x: x['bbox'][3], reverse=True)
             else:
-                # Fallback to existing order_id if no bboxes (Digital mode fallback)
                 items.sort(key=lambda x: x.get('order_id', 0))
 
             # --- 4. RENDER PAGE ---
@@ -87,6 +78,18 @@ class FinalReportGenerator:
                     analysis = item.get('analysis', {})
                     content = analysis.get('content', {})
                     
+                    # --- NEW: Confidence Score Visualization ---
+                    conf_score = analysis.get('confidence_score', 0.0)
+                    conf_reason = analysis.get('confidence_reason', '')
+                    
+                    if conf_score > 0.8:
+                        conf_text = f"<font color='green'><b>High Confidence ({int(conf_score*100)}%)</b></font>"
+                    elif conf_score > 0.5:
+                        conf_text = f"<font color='orange'><b>Medium Confidence ({int(conf_score*100)}%)</b></font>"
+                    else:
+                        conf_text = f"<font color='red'><b>Low Confidence ({int(conf_score*100)}%)</b></font>"
+                    # --------------------------------------------
+
                     heading = analysis.get('heading', 'Visual Analysis')
                     overview = content.get('overview', 'No description available.')
                     
@@ -94,7 +97,13 @@ class FinalReportGenerator:
                     for f in content.get('key_findings', []):
                         findings_text += f"• {f}<br/>"
 
-                    analysis_content = f"<b>{heading}</b><br/><br/>{overview}<br/><br/>{findings_text}"
+                    # Updated Analysis Content with Confidence Badge
+                    analysis_content = f"""
+                    <b>{heading}</b> &nbsp;&nbsp;|&nbsp;&nbsp; {conf_text}<br/><br/>
+                    {overview}<br/><br/>
+                    {findings_text}<br/><br/>
+                    <i><font size=8 color='grey'>Reasoning: {conf_reason}</font></i>
+                    """
                     
                     p = Paragraph(analysis_content, self.styles['AnalysisBody'])
                     t = Table([[p]], colWidths=[6.5*inch])

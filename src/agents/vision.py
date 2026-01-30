@@ -21,21 +21,20 @@ class VisionAgent:
         
         INSTRUCTIONS:
         1. **Identify**: Is this a Chart, Table, Diagram, or a Logo/Header?
-        2. **Logos/Headers**: If it is a company logo or graphical header, simply state what it says and represents. Do not hallucinate data.
-        3. **Charts/Graphs**: Extract the real data and trends.
+        2. **Logos/Headers**: State what it represents.
+        3. **Charts/Graphs**: Extract data and trends.
+        4. **Confidence**: Rate your confidence (0.0 - 1.0) based on image clarity and ambiguity.
         
         OUTPUT FORMAT (JSON):
         {{
-            "heading": "Short Title (e.g., 'Mistral AI Logo' or 'Performance Benchmark')",
+            "heading": "Short Title",
             "content": {{
-                "overview": "Clear description of the visual.",
-                "key_findings": [
-                    "Insight 1 (or 'Company branding detected' for logos)"
-                ],
-                "extracted_data": {{
-                    // Only for charts/tables. Leave empty for logos.
-                }}
-            }}
+                "overview": "Description...",
+                "key_findings": ["Finding 1", "Finding 2"],
+                "extracted_data": {{ "Metric": "Value" }}
+            }},
+            "confidence_score": 0.95,
+            "confidence_reason": "Image is clear and legends are readable."
         }}
         
         Return ONLY valid JSON.
@@ -47,12 +46,10 @@ class VisionAgent:
             return json.loads(text)
         except Exception:
             return {
-                "heading": "Visual Element",
-                "content": {
-                    "overview": "Content could not be analyzed.",
-                    "key_findings": [],
-                    "extracted_data": {}
-                }
+                "heading": "Analysis Failed",
+                "content": {"overview": "Could not analyze.", "key_findings": []},
+                "confidence_score": 0.0,
+                "confidence_reason": "Model error or invalid image."
             }
 
 vision_agent = VisionAgent()
