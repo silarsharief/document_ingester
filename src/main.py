@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import shutil
 from docling.datamodel.document import TextItem, TableItem, PictureItem, SectionHeaderItem
@@ -23,6 +24,7 @@ class AnalysisPipeline:
         os.makedirs(self.debug_dir, exist_ok=True)
     
     def run(self, pdf_path: str, scanned_mode: bool = False):
+        start_time = time.time() # <--- Start Timer
         log.info(f"🚀 Starting Pipeline: {pdf_path} (Scanned Mode: {scanned_mode})")
         
         try:
@@ -185,7 +187,14 @@ class AnalysisPipeline:
         
         self.debug_reporter.save()
         self.final_reporter.generate(final_output)
+        end_time = time.time()
+        duration = end_time - start_time
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
         
+        log.info(f"✅ Done.")
+        log.info(f"⏱️  Total Processing Time: {minutes}m {seconds}s") # <--- Log it
+        log.info(f"📄 Full Analysis: [underline]full_analysis.pdf[/]")
         log.info(f"✅ Done.")
         log.info(f"📄 Full Analysis: [underline]full_analysis.pdf[/]")
 
