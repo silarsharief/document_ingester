@@ -10,23 +10,29 @@ class RAGAgent:
         # 1. Connect to the Brain (ChromaDB)
         self.vector_store = LocalVectorStore()
         
-        # 2. Connect to the Mouth (Gemini Pro)
+        # 2. Connect to the Mouth (Gemini 2.0 Flash)
         genai.configure(api_key=settings.GOOGLE_API_KEY)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # UPDATED: Switched to 2.0 Flash per your request
+        # If 'gemini-2.0-flash' fails, try 'gemini-2.0-flash-exp'
+        self.model = genai.GenerativeModel('gemini-2.0-flash') 
 
     def ask(self, query: str) -> dict:
         log.info(f"🤔 User Query: '{query}'")
         
         # --- Step 1: Retrieval ---
-        # Get top 5 most relevant chunks (Text or Visuals)
-        results = self.vector_store.query(query, n_results=5)
+        try:
+            results = self.vector_store.query(query, n_results=5)
+        except Exception as e:
+            log.error(f"Vector Store Error: {e}")
+            return {"answer": "Error accessing the knowledge base.", "sources": {}}
         
-        if not results['documents'][0]:
-            return {"answer": "I couldn't find any information about that in the document.", "sources": []}
+        if not results['documents'] or not results['documents'][0]:
+            return {"answer": "I couldn't find any information about that in the document.", "sources": {}}
 
         # --- Step 2: Context Construction ---
         context_str = ""
-        source_map = {} # To track image paths for the UI
+        source_map = {} 
         
         for i, doc_text in enumerate(results['documents'][0]):
             meta = results['metadatas'][0][i]
@@ -40,7 +46,7 @@ class RAGAgent:
                 
             context_str += f"{source_id} {prefix}{doc_text}\n\n"
             
-            # Store metadata for the UI (Images!)
+            # Store metadata for the UI 
             source_map[source_id] = {
                 "page": meta.get('page'),
                 "type": meta.get('type'),
@@ -48,7 +54,7 @@ class RAGAgent:
                 "confidence": meta.get('confidence', None)
             }
 
-        # --- Step 3: Generation (The Prompt) ---
+        # --- Step 3: Generation ---
         prompt = f"""
         You are QuickSight AI, a multi-modal document assistant.
         
@@ -69,16 +75,15 @@ class RAGAgent:
             answer_text = response.text
         except Exception as e:
             log.error(f"LLM Error: {e}")
-            answer_text = "I encountered an error generating the response."
+            # Fallback message
+            answer_text = f"I encountered an error generating the response with Gemini 2.0. Error: {e}"
 
         return {
             "answer": answer_text,
-            "sources": source_map # Passing this to the UI is the key to your "Visual RAG"
+            "sources": source_map 
         }
 
-# Simple test block
 if __name__ == "__main__":
     agent = RAGAgent()
-    # Test Question based on your Mistral document
     response = agent.ask("How does Mistral 7B compare to Llama 2?")
     print("\n🤖 ANSWER:\n", response['answer'])
