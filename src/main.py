@@ -24,7 +24,7 @@ class AnalysisPipeline:
         os.makedirs(self.debug_dir, exist_ok=True)
     
     def run(self, pdf_path: str, scanned_mode: bool = False):
-        start_time = time.time() # <--- Start Timer
+        start_time = time.time() 
         log.info(f"🚀 Starting Pipeline: {pdf_path} (Scanned Mode: {scanned_mode})")
         
         try:
@@ -33,8 +33,6 @@ class AnalysisPipeline:
             log.critical(f"❌ Ingestion Failed: {e}")
             return
 
-        # 1. PAGE BUCKETS: { 1: [], 2: [] }
-        # We group everything by page first to prevent image drift
         pages_content = {} 
         yolo_cache = {}
         global_counter = 0 
@@ -46,7 +44,6 @@ class AnalysisPipeline:
             current_item = None
             page_no = item.prov[0].page_no
             
-            # Initialize bucket
             if page_no not in pages_content:
                 pages_content[page_no] = []
 
@@ -59,9 +56,8 @@ class AnalysisPipeline:
                     "content": item.text,
                     "page": page_no,
                     "bbox": [bbox.l, bbox.b, bbox.r, bbox.t],
-                    # Store keys for sorting
-                    "sort_y": bbox.t,          # Spatial (Top-Down)
-                    "arrival_id": global_counter # Logical (Reading Order)
+                    "sort_y": bbox.t,
+                    "arrival_id": global_counter 
                 }
 
             # --- Tables ---
@@ -78,12 +74,18 @@ class AnalysisPipeline:
                     "arrival_id": global_counter
                 }
 
-            # --- Visuals ---
+            # --- Visuals (CRITICAL FIX HERE) ---
             elif isinstance(item, PictureItem):
                 log.info(f"   🖼️  Processing Visual on Page {page_no}")
                 
                 try:
-                    page_obj = doc_result.pages[page_no]
+                    # FIX: Correct 1-based to 0-based index
+                    page_idx = page_no - 1
+                    if page_idx < 0 or page_idx >= len(doc_result.pages):
+                        log.warning(f"      ⚠️ Page {page_no} out of range for image extraction. Skipping.")
+                        continue
+
+                    page_obj = doc_result.pages[page_idx]
                     page_img = page_obj.image.pil_image if hasattr(page_obj.image, "pil_image") else page_obj.image
                     pg_w, pg_h = page_img.width, page_img.height
 
@@ -96,13 +98,11 @@ class AnalysisPipeline:
                     
                     # 2. Coordinate Mapping
                     d_bbox = item.prov[0].bbox
-                    # Normalize if needed
                     if d_bbox.l < 1.0: 
                         d_l, d_b, d_r, d_t = d_bbox.l*pg_w, d_bbox.b*pg_h, d_bbox.r*pg_w, d_bbox.t*pg_h
                     else: 
                         d_l, d_b, d_r, d_t = d_bbox.l, d_bbox.b, d_bbox.r, d_bbox.t
                     
-                    # Flip Y for Cropping (Image uses Top-Left Origin)
                     d_top_img = pg_h - d_t
                     d_bot_img = pg_h - d_b
                     if d_top_img > d_bot_img: d_top_img, d_bot_img = d_bot_img, d_top_img
@@ -118,7 +118,6 @@ class AnalysisPipeline:
                     
                     base_box = tuple(map(int, best_yolo_box)) if best_yolo_box else (int(d_l), int(d_top_img), int(d_r), int(d_bot_img))
 
-                    # Smart Crop Expansion
                     width = base_box[2] - base_box[0]
                     height = base_box[3] - base_box[1]
                     final_crop = (
@@ -128,7 +127,6 @@ class AnalysisPipeline:
                         min(pg_h, base_box[3] + max(150, int(height * 0.15)))
                     )
 
-                    # Save Smart Crop (This is the Fixed Image)
                     crop_filename = f"p{page_no}_crop_{global_counter}.png"
                     crop_path = os.path.join(self.debug_dir, crop_filename)
                     page_img.crop(final_crop).save(crop_path)
@@ -136,7 +134,6 @@ class AnalysisPipeline:
                     context_str = f"PREVIOUS TEXT:\n...{text_before[-1000:]}\nFOLLOWING TEXT:\n{text_after[:1000]}..."
                     analysis_result = vision_agent.analyze_element(crop_path, "visual", context_str)
 
-                    # Debug report
                     docling_ref = os.path.join(self.debug_dir, f"p{page_no}_ref_{global_counter}.png")
                     page_img.crop((int(d_l), int(d_top_img), int(d_r), int(d_bot_img))).save(docling_ref)
                     self.debug_reporter.add_comparison(page_no, docling_ref, crop_path, str(analysis_result))
@@ -145,19 +142,18 @@ class AnalysisPipeline:
                         "type": "visual",
                         "bbox": list(final_crop), 
                         "analysis": analysis_result, 
-                        "file_path": crop_path, # <--- Saving the YOLO Crop for Full Analysis
+                        "file_path": crop_path, 
                         "page": page_no,
-                        "sort_y": d_bbox.t, # Use Raw Docling Y for sorting
+                        "sort_y": d_bbox.t, 
                         "arrival_id": global_counter
                     }
 
                 except Exception as e:
-                    log.error(f"      ⚠️ Visual Error: {e}")
+                    log.error(f"      ⚠️ Visual Error on Page {page_no}: {e}")
 
             if current_item:
                 pages_content[page_no].append(current_item)
 
-        # --- 3. PAGE-LEVEL SORTING & FLATTENING ---
         log.info("🔄 Sorting elements per page...")
         final_output = []
         
@@ -165,40 +161,49 @@ class AnalysisPipeline:
         
         for p_num in sorted_page_nums:
             items = pages_content[p_num]
-            
-            # CRITICAL FIX: Sort Logic
             if scanned_mode:
-                # Scanned: Sort ASCENDING (0 -> 1000). 0 is Top.
                 items.sort(key=lambda x: x['sort_y'])
             else:
-                # Digital: Trust Arrival Order (Preserves Columns)
                 items.sort(key=lambda x: x['arrival_id'])
             
             for item in items:
                 item['order_id'] = len(final_output) + 1
-                # Clean up temp keys
                 del item['sort_y']
                 del item['arrival_id']
                 final_output.append(item)
 
-        # Finalize
+        # --- METRICS & SAVE ---
+        total_pages = max([x.get('page', 1) for x in final_output]) if final_output else 0
+        total_visuals = len([x for x in final_output if x['type'] == 'visual'])
+        total_tables = len([x for x in final_output if x['type'] == 'table'])
+        total_text = len([x for x in final_output if x['type'] == 'text'])
+        
+        confidences = [x.get('analysis', {}).get('confidence_score', 0) for x in final_output if x['type'] == 'visual']
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+        end_time = time.time()
+        duration_sec = end_time - start_time
+        mins, secs = int(duration_sec // 60), int(duration_sec % 60)
+        
+        metrics = {
+            "duration": f"{mins}m {secs}s",
+            "total_pages": total_pages,
+            "total_visuals": total_visuals,
+            "total_tables": total_tables,
+            "total_text": total_text,
+            "avg_confidence": avg_confidence
+        }
+
         with open("data/rag_dataset.json", "w") as f:
             json.dump(final_output, f, indent=2)
         
         self.debug_reporter.save()
-        self.final_reporter.generate(final_output)
-        end_time = time.time()
-        duration = end_time - start_time
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
+        self.final_reporter.generate(final_output, metrics=metrics)
         
-        log.info(f"✅ Done.")
-        log.info(f"⏱️  Total Processing Time: {minutes}m {seconds}s") # <--- Log it
-        log.info(f"📄 Full Analysis: [underline]full_analysis.pdf[/]")
-        log.info(f"✅ Done.")
-        log.info(f"📄 Full Analysis: [underline]full_analysis.pdf[/]")
+        log.info(f"✅ Processing Complete.")
+        log.info(f"⏱️  Time: {metrics['duration']} | Visuals: {total_visuals}")
+        log.info(f"📄 Report: [underline]full_analysis.pdf[/]")
 
 if __name__ == "__main__":
     if os.path.exists("data/test_doc.pdf"):
-        # Digital PDF -> scanned_mode=False
         AnalysisPipeline().run("data/test_doc.pdf", scanned_mode=False)

@@ -5,22 +5,66 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
 
 class FinalReportGenerator:
     def __init__(self, output_path="full_analysis.pdf"):
         self.output_path = output_path
         self.styles = getSampleStyleSheet()
-        self.styles.add(ParagraphStyle(name='AnalysisHeader', fontSize=12, fontName='Helvetica-Bold', textColor=colors.darkblue, spaceAfter=6))
+        self.styles.add(ParagraphStyle(name='AnalysisHeader', fontSize=14, fontName='Helvetica-Bold', textColor=colors.darkblue, spaceAfter=10))
+        self.styles.add(ParagraphStyle(name='MetricLabel', fontSize=10, fontName='Helvetica-Bold', textColor=colors.gray))
+        self.styles.add(ParagraphStyle(name='MetricValue', fontSize=12, fontName='Helvetica-Bold', textColor=colors.black))
         self.styles.add(ParagraphStyle(name='AnalysisBody', fontSize=10, fontName='Helvetica', leading=12))
         self.styles.add(ParagraphStyle(name='CodeData', fontSize=8, fontName='Courier', leftIndent=20, textColor=colors.darkgreen))
         self.styles.add(ParagraphStyle(name='PageLabel', fontSize=8, fontName='Helvetica-Oblique', textColor=colors.gray, alignment=2))
 
-    def generate(self, data):
+    def generate(self, data, metrics=None):
         print(f"📄 Generating Full PDF: {self.output_path}...")
         story = []
-        story.append(Paragraph("Full Document Analysis Report", self.styles['Title']))
-        story.append(Spacer(1, 0.5*inch))
+        
+        # --- PAGE 1: SYSTEM METRICS DASHBOARD ---
+        story.append(Paragraph("QuickSight AI: Ingestion Metrics Report", self.styles['Title']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        if metrics:
+            # 1. High Level Stats Row
+            data_summary = [
+                [Paragraph("Processing Time", self.styles['MetricLabel']), 
+                 Paragraph("Total Pages", self.styles['MetricLabel']),
+                 Paragraph("Visual Confidence", self.styles['MetricLabel'])],
+                [Paragraph(metrics.get('duration', 'N/A'), self.styles['MetricValue']),
+                 Paragraph(str(metrics.get('total_pages', 0)), self.styles['MetricValue']),
+                 Paragraph(f"{metrics.get('avg_confidence', 0)*100:.1f}%", self.styles['MetricValue'])]
+            ]
+            t_summary = Table(data_summary, colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
+            t_summary.setStyle(TableStyle([
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('topPadding', (0,0), (-1,-1), 10),
+                ('bottomPadding', (0,0), (-1,-1), 15),
+                ('LINEBELOW', (0,0), (-1,-1), 1, colors.lightgrey),
+            ]))
+            story.append(t_summary)
+            story.append(Spacer(1, 0.4*inch))
 
+            # 2. Detailed Pipeline Comparison (YOLO vs Docling)
+            story.append(Paragraph("Pipeline Performance: Detection Audit", self.styles['AnalysisHeader']))
+            
+            # Simple text summary of the audit
+            audit_text = f"""
+            <b>Visual Elements Detected:</b> {metrics.get('total_visuals', 0)}<br/>
+            <b>Tables Extracted:</b> {metrics.get('total_tables', 0)}<br/>
+            <b>Text Segments:</b> {metrics.get('total_text', 0)}<br/><br/>
+            This pipeline uses a Hybrid Routing architecture. The 'Visual Elements' count represents 
+            complex figures intercepted by the YOLOv8 Auditor and processed by the Vision Agent.
+            """
+            story.append(Paragraph(audit_text, self.styles['AnalysisBody']))
+            story.append(Spacer(1, 0.5*inch))
+            
+            story.append(PageBreak())
+
+        # --- EXISTING CONTENT GENERATION ---
+        # (Paste your existing grouping/sorting logic here exactly as before)
         # --- 1. BUNCH BY PAGE (Grouping) ---
         pages_bucket = {}
         for item in data:
@@ -28,26 +72,24 @@ class FinalReportGenerator:
             if p not in pages_bucket: pages_bucket[p] = []
             pages_bucket[p].append(item)
 
-        # --- 2. PROCESS PAGES IN ORDER ---
         sorted_page_nums = sorted(pages_bucket.keys())
         
         for p_num in sorted_page_nums:
             items = pages_bucket[p_num]
 
-            # --- 3. SORT LOGIC (The Fix) ---
-            # Sort High Y (Header) to Low Y (Footer) -> Reverse=True
+            # --- SORT LOGIC ---
             has_bboxes = all('bbox' in x for x in items)
-            
             if has_bboxes:
                 items.sort(key=lambda x: x['bbox'][3], reverse=True)
             else:
                 items.sort(key=lambda x: x.get('order_id', 0))
 
-            # --- 4. RENDER PAGE ---
-            if p_num > sorted_page_nums[0]:
+            # --- RENDER PAGE ---
+            if p_num > sorted_page_nums[0]: # Page break for subsequent pages
                 story.append(PageBreak())
-                story.append(Paragraph(f"--- Source Page {p_num} ---", self.styles['PageLabel']))
-                story.append(Spacer(1, 0.2*inch))
+                
+            story.append(Paragraph(f"--- Source Page {p_num} ---", self.styles['PageLabel']))
+            story.append(Spacer(1, 0.2*inch))
 
             for item in items:
                 # TEXT
@@ -74,11 +116,9 @@ class FinalReportGenerator:
                         story.append(img)
                         story.append(Spacer(1, 0.1*inch))
                     
-                    # Analysis Block
                     analysis = item.get('analysis', {})
                     content = analysis.get('content', {})
                     
-                    # --- NEW: Confidence Score Visualization ---
                     conf_score = analysis.get('confidence_score', 0.0)
                     conf_reason = analysis.get('confidence_reason', '')
                     
@@ -88,7 +128,6 @@ class FinalReportGenerator:
                         conf_text = f"<font color='orange'><b>Medium Confidence ({int(conf_score*100)}%)</b></font>"
                     else:
                         conf_text = f"<font color='red'><b>Low Confidence ({int(conf_score*100)}%)</b></font>"
-                    # --------------------------------------------
 
                     heading = analysis.get('heading', 'Visual Analysis')
                     overview = content.get('overview', 'No description available.')
@@ -97,7 +136,6 @@ class FinalReportGenerator:
                     for f in content.get('key_findings', []):
                         findings_text += f"• {f}<br/>"
 
-                    # Updated Analysis Content with Confidence Badge
                     analysis_content = f"""
                     <b>{heading}</b> &nbsp;&nbsp;|&nbsp;&nbsp; {conf_text}<br/><br/>
                     {overview}<br/><br/>

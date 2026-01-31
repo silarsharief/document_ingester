@@ -5,7 +5,6 @@ def setup_logger(name: str):
     """
     Returns a production-ready logger with Rich formatting.
     """
-    # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     
