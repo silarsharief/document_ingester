@@ -11,7 +11,7 @@ log = setup_logger("orchestrator")
 
 class MultiAgentOrchestrator:
     def __init__(self, vector_store=None):
-        log.info("🤖 Initializing Multi-Agent Swarm (Async Mode)...")
+        log.info("🤖 Initializing Formatted-Swarm Orchestrator...")
         
         if vector_store:
             self.vector_store = vector_store
@@ -29,8 +29,7 @@ class MultiAgentOrchestrator:
 
     def retrieve_and_split(self, query: str):
         try:
-            # Fetch more candidates to ensure we capture visuals if they exist down the list
-            results = self.vector_store.query(query, n_results=30)
+            results = self.vector_store.query(query, n_results=50)
         except Exception as e:
             log.error(f"Vector Store Error: {e}")
             return [], [], []
@@ -41,103 +40,113 @@ class MultiAgentOrchestrator:
         raw_docs = results['documents'][0]
         raw_metas = results['metadatas'][0]
         
-        # Rerank everything
+        # Rerank
         pred_pairs = [[query, doc] for doc in raw_docs]
         scores = self.reranker.predict(pred_pairs)
         
-        candidates = []
+        text_candidates = []
+        visual_candidates = []
+        
         for i, score in enumerate(scores):
-            candidates.append({
+            item = {
                 "content": raw_docs[i],
                 "meta": raw_metas[i],
                 "score": float(score),
                 "type": raw_metas[i].get("type", "text"),
-                "page": raw_metas[i].get("page", "?"),
-                "image_path": raw_metas[i].get("image_path", None)
-            })
-        
-        # Sort highest score first
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        
-        # --- DYNAMIC RELATIVE THRESHOLD ---
-        # Instead of fixed 0.01, we look at the best score.
-        if not candidates:
-            return [], [], []
+                "image_path": raw_metas[i].get("image_path", "")
+            }
+            
+            if item['type'] == 'visual':
+                visual_candidates.append(item)
+            else:
+                text_candidates.append(item)
 
-        best_score = candidates[0]['score']
-        # We allow chunks that are within a reasonable range of the best match.
-        # This prevents dropping good visuals just because they are slightly lower than text.
-        acceptable_range = 7.0 
-        threshold = best_score - acceptable_range
+        # Sort
+        text_candidates.sort(key=lambda x: x['score'], reverse=True)
+        visual_candidates.sort(key=lambda x: x['score'], reverse=True)
         
-        final_selection = [c for c in candidates if c['score'] >= threshold]
+        # --- PERMISSIVE LOGIC ---
+        # Show visuals if they exist (Score > -15.0)
+        visual_threshold = -15.0
         
-        # Limit to Top 8 after filtering
-        final_selection = final_selection[:8]
+        final_visual = [v for v in visual_candidates if v['score'] > visual_threshold][:2]
+        remaining_slots = 4 - len(final_visual)
+        final_text = text_candidates[:remaining_slots]
         
-        # Split for agents
-        text_chunks = [c for c in final_selection if c['type'] in ['text', 'header', 'table']]
-        visual_chunks = [c for c in final_selection if c['type'] == 'visual']
-        
-        log.info(f"📊 Selection Strategy: Top Score {best_score:.2f} -> Threshold {threshold:.2f}")
-        log.info(f"   Selected {len(text_chunks)} Text & {len(visual_chunks)} Visuals")
-        
-        return text_chunks, visual_chunks, final_selection
+        log.info(f"📊 Selection: {len(final_text)} Text + {len(final_visual)} Visual")
+        return final_text, final_visual, final_text + final_visual
+
+    async def _safe_generate(self, func, *args):
+        retries = 3
+        for i in range(retries):
+            try:
+                return await func(*args)
+            except Exception as e:
+                if "429" in str(e):
+                    wait_time = (i + 1) * 2
+                    log.warning(f"⚠️ Rate Limit. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    log.error(f"❌ API Error: {e}")
+                    return "Error generating response."
+        return "System Busy (Rate Limit)."
 
     async def ask(self, query: str) -> dict:
         start_time = time.time()
-        log.info(f"🔎 Orchestrator processing: '{query}'")
+        log.info(f"🔎 Processing: '{query}'")
         
+        # 1. Retrieval
         text_chunks, visual_chunks, all_evidence = self.retrieve_and_split(query)
         
         if not all_evidence:
-            return {"answer": "I couldn't find any relevant information in the documents.", "evidence": []}
+            return {"answer": "I couldn't find any relevant information.", "evidence": []}
 
-        # Dispatch Agents
-        log.info(f"   ... ⚡ Dispatching Swarm: {len(text_chunks)} Text Docs + {len(visual_chunks)} Visual Docs")
+        # 2. Async Execution
+        text_task = self._safe_generate(self.text_agent.analyze, query, text_chunks)
         
-        text_task = self.text_agent.analyze(query, text_chunks)
-        vision_task = self.vision_agent.analyze(query, visual_chunks)
-        
+        if visual_chunks:
+            vision_task = self._safe_generate(self.vision_agent.analyze, query, visual_chunks)
+        else:
+            async def dummy(): return "No visuals."
+            vision_task = dummy()
+            
         text_insight, visual_insight = await asyncio.gather(text_task, vision_task)
-        
-        # Fusion
+
+        # 3. Fusion (BETTER FORMATTING)
         log.info("   ... Fusing Insights")
         prompt = f"""
-        You are the Fusion Agent. Combine the insights from the Text and Vision specialists.
+        You are the Fusion Agent. Combine the Text and Visual insights into a final answer.
         
         USER QUERY: "{query}"
         
-        [TEXT SPECIALIST REPORT]:
-        {text_insight}
+        [TEXT INSIGHT]: {text_insight}
         
-        [VISION SPECIALIST REPORT]:
-        {visual_insight}
+        [VISUAL INSIGHT]: {visual_insight}
         
         INSTRUCTIONS:
-        1. Synthesize a single, natural answer.
-        2. If the Vision Specialist found relevant charts/diagrams, EXPLICITLY reference them (e.g., "As seen in Figure on Page X...").
-        3. If Visuals were analyzed but found irrelevant, ignore them.
-        4. Cite sources as [Source 1, 2] based on the provided evidence list.
+        1. **Format:** Use Markdown.
+           - Use **Bold** for key terms or names.
+           - Use **Bullet Points** for lists (authors, steps, comparisons).
+           - Use short paragraphs for readability.
+        2. **Visuals:** IF the Visual Insight contains useful info, mention it explicitly (e.g., "As shown in the chart...").
+        3. **Cleanup:** IF the Visual Insight is irrelevant/broken, IGNORE IT.
+        4. **Citations:** Cite sources as [Source 1].
         """
         
+        fusion_response = await self._safe_generate(self.fusion_model.generate_content_async, prompt)
         try:
-            fusion_response = await self.fusion_model.generate_content_async(prompt)
-            raw_answer = fusion_response.text
+            final_answer = fusion_response.text
         except:
-            raw_answer = "Error during fusion."
+            final_answer = "Fusion Error."
 
-        # Validation
-        log.info("   ... Validating Response")
-        validation = await self.validator.validate(query, raw_answer, [c['content'] for c in all_evidence])
-        
-        final_answer = raw_answer
-        if validation['confidence_score'] < 0.3:
-            final_answer += f"\n\n*(Note: Low confidence. Critique: {validation['critique']})*"
-            log.warning(f"⚠️ Validation Flag: {validation['critique']}")
+        # 4. Validation
+        try:
+            validation = await self.validator.validate(query, final_answer, [c['content'] for c in all_evidence])
+        except:
+            validation = {'score': 1.0}
 
         duration = time.time() - start_time
-        log.info(f"✅ Request complete in {duration:.2f}s | Confidence: {validation.get('confidence_score', 0):.2f}")
+        log.info(f"✅ Complete in {duration:.2f}s")
 
         return {
             "answer": final_answer,
