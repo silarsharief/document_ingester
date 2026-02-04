@@ -67,7 +67,7 @@ class MultiAgentOrchestrator:
         
         # --- PERMISSIVE LOGIC ---
         # Show visuals if they exist (Score > -15.0)
-        visual_threshold = -15.0
+        visual_threshold = -11.0
         
         final_visual = [v for v in visual_candidates if v['score'] > visual_threshold][:2]
         remaining_slots = 4 - len(final_visual)

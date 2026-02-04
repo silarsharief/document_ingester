@@ -18,117 +18,65 @@ class DocumentChunker:
             log.critical(f"❌ File not found: {self.input_path}")
             return []
 
-        # --- PASS 1: AGGREGATION (Grouping small items) ---
-        logical_blocks = []
-        buffer_text = ""
-        buffer_meta = None
-        MIN_BLOCK_SIZE = 400
-        
-        log.info(f"📊 Starting Pass 1: Aggregation (Min Size: {MIN_BLOCK_SIZE})...")
+        chunks = []
+        log.info(f"📊 Found {len(data)} items. Starting semantic processing...")
 
         for i, item in enumerate(data):
+            # Use 'order_id' to maintain the reading flow
+            doc_id = f"doc_{item.get('order_id', i)}"
             page = item.get('page', 0)
             dtype = item.get('type', 'unknown')
-            content = item.get('content', '').strip()
             
-            if not content: continue
+            # Base Metadata - Vital for RAG Filtering
+            metadata = {
+                "source": "docling_pipeline",
+                "page": page,
+                "type": dtype,
+                "doc_id": doc_id,
+                "bbox": str(item.get('bbox', []))
+            }
 
-            # A. VISUALS/TABLES (Hard Stops)
-            if dtype in ['table', 'visual']:
-                # 1. Flush any pending text buffer
-                if buffer_text:
-                    logical_blocks.append({"text": buffer_text, "meta": buffer_meta, "type": "text"})
-                    buffer_text = ""
-                    buffer_meta = None
+            text_to_embed = ""
+
+            # --- STRATEGY: TEXT ---
+            if dtype in ['text', 'header']:
+                text_to_embed = item.get('content', '').strip()
+                # Skip noise (page numbers, tiny artifacts)
+                if len(text_to_embed) < 10: 
+                    continue
+
+            # --- STRATEGY: TABLE ---
+            elif dtype == 'table':
+                # Embed the Markdown structure so the LLM understands rows/cols
+                text_to_embed = f"Table on Page {page}:\n" + item.get('content', '')
+                log.info(f"   📅 Processed Table on Page {page}")
+
+            # --- STRATEGY: VISUAL (The Multi-Modal Bridge) ---
+            elif dtype == 'visual':
+                analysis = item.get('analysis', {})
+                content = analysis.get('content', {})
                 
-                # 2. Process the Special Item
-                special_text = ""
-                special_meta = self._get_base_metadata(item, i)
+                # 1. We embed the SEMANTIC meaning (The Text Description)
+                heading = analysis.get('heading', 'Visual Element')
+                overview = content.get('overview', '')
+                findings = " ".join(content.get('key_findings', []))
                 
-                if dtype == 'table':
-                    special_text = f"Table on Page {page}:\n{content}"
-                    log.info(f"   📅 Processed Table on Page {page}")
-                else:
-                    # Visual Logic
-                    analysis = item.get('analysis', {})
-                    cont = analysis.get('content', {})
-                    heading = analysis.get('heading', 'Visual Element')
-                    
-                    special_text = f"Visual Chart: {heading}.\nDesc: {cont.get('overview', '')}\nInsights: {' '.join(cont.get('key_findings', []))}"
-                    
-                    # Store valid image path
-                    special_meta['image_path'] = item.get('file_path', "") 
-                    special_meta['confidence'] = analysis.get('confidence_score', 0.0)
-                    
-                    log.info(f"   🖼️  Processed Visual '{heading}' on Page {page}")
+                # This text is what the Vector DB will "search" against
+                text_to_embed = f"Visual Chart/Figure: {heading}.\nDescription: {overview}\nKey Insights: {findings}"
                 
-                logical_blocks.append({"text": special_text, "meta": special_meta, "type": dtype})
-                continue
-
-            # B. TEXT AGGREGATION
-            if not buffer_text:
-                buffer_meta = self._get_base_metadata(item, i)
-            
-            separator = "\n" if buffer_text else ""
-            buffer_text += f"{separator}{content}"
-
-            is_header = (dtype == 'header')
-            
-            next_page_change = False
-            if i + 1 < len(data):
-                if data[i+1].get('page') != page:
-                    next_page_change = True
-            else:
-                next_page_change = True 
-
-            if (len(buffer_text) > MIN_BLOCK_SIZE and not is_header) or next_page_change:
-                logical_blocks.append({"text": buffer_text, "meta": buffer_meta, "type": "text"})
-                buffer_text = ""
-                buffer_meta = None
-
-        if buffer_text:
-            logical_blocks.append({"text": buffer_text, "meta": buffer_meta, "type": "text"})
-
-        # --- PASS 2: CONTEXT OVERLAP ---
-        final_chunks = []
-        log.info(f"🔗 Starting Pass 2: Context Overlap (Blocks: {len(logical_blocks)})...")
-
-        for i, block in enumerate(logical_blocks):
-            current_text = block['text']
-            
-            if block['type'] == 'text':
-                prev_ctx = ""
-                if i > 0 and logical_blocks[i-1]['meta']['page'] == block['meta']['page']:
-                    prev_ctx = f"[Context Above]: ...{logical_blocks[i-1]['text'][-200:]}\n"
+                # 2. We store the VISUAL PROOF (Image Path) in metadata
+                metadata['image_path'] = item.get('file_path', '')
+                metadata['confidence'] = analysis.get('confidence_score', 0.0)
                 
-                next_ctx = ""
-                if i < len(logical_blocks) - 1 and logical_blocks[i+1]['meta']['page'] == block['meta']['page']:
-                    next_ctx = f"\n[Context Below]: {logical_blocks[i+1]['text'][:200]}..."
+                log.info(f"   🖼️  Processed Visual '{heading}' on Page {page} (Conf: {metadata['confidence']:.2f})")
 
-                final_text = f"{prev_ctx}*** {current_text} ***{next_ctx}"
-            else:
-                final_text = current_text
+            # Final check before adding
+            if text_to_embed:
+                chunks.append({
+                    "id": doc_id,
+                    "text": text_to_embed,
+                    "metadata": metadata
+                })
 
-            final_chunks.append({
-                "id": block['meta']['doc_id'],
-                "text": final_text,
-                "metadata": block['meta']
-            })
-
-        log.info(f"✅ Chunking Complete. Created {len(final_chunks)} Hybrid documents.")
-        return final_chunks
-
-    def _get_base_metadata(self, item, index):
-        """
-        Creates standard metadata.
-        CRITICAL FIX: image_path defaults to "" (empty string), NOT None.
-        ChromaDB crashes if metadata values are None.
-        """
-        return {
-            "source": "docling_pipeline",
-            "page": item.get('page', 0),
-            "type": item.get('type', 'text'),
-            "doc_id": f"doc_{item.get('order_id', index)}",
-            "bbox": str(item.get('bbox', [])),
-            "image_path": "" # <--- CHANGED FROM None TO ""
-        }
+        log.info(f"✅ Chunking Complete. Created {len(chunks)} embeddable documents.")
+        return chunks
