@@ -3,17 +3,30 @@ import requests
 from ultralytics import YOLO
 from PIL import Image
 
+from src.core.config import settings
+
+MODEL_NAME = "yolov8n-doclaynet.pt"
+
+
 class VisualAuditor:
     def __init__(self):
         print("👁️ Initializing YOLO Visual Auditor...")
-        self.model_path = "yolov8n-doclaynet.pt"
+        # Use config path (e.g. /app/yolov8n-doclaynet.pt in Docker) if file exists, else resolve
+        self.model_path = self._resolve_model_path()
         self._ensure_model_exists()
         self.model = YOLO(self.model_path)
-        
-        # DocLayNet Classes we care about: 
-        # 4=Picture, 5=Section-header (ignore), 6=Caption, 7=Formula, 8=Table
-        # We focus on Picture (4) and Table (8) to correct bounds.
+        # DocLayNet: 4=Picture, 5=Section-header, 6=Caption, 7=Formula, 8=Table
         self.target_classes = [4, 8]
+
+    def _resolve_model_path(self):
+        """Prefer config YOLO path, then /app, then cwd."""
+        if hasattr(settings, "YOLO_MODEL_PATH") and os.path.isfile(settings.YOLO_MODEL_PATH):
+            return settings.YOLO_MODEL_PATH
+        for base in ("/app", os.getcwd()):
+            path = os.path.join(base, MODEL_NAME)
+            if os.path.isfile(path):
+                return path
+        return MODEL_NAME
 
     def _ensure_model_exists(self):
         if not os.path.exists(self.model_path):

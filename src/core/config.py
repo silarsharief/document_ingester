@@ -19,8 +19,7 @@ class Settings(BaseSettings):
     
     # --- M1 Optimization Limits ---
     MAX_CONCURRENT_PAGES: int = 3  # Keeps RAM usage safe
-    YOLO_MODEL_PATH: str = "keremberke/yolov8m-doclaynet" 
-    
+    YOLO_MODEL_PATH: str = "/app/yolov8n-doclaynet.pt" 
     class Config:
         env_file = ".env"
         case_sensitive = True

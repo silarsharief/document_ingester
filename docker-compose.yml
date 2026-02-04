@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   quicksight-ai:
     build: .
@@ -14,8 +12,8 @@ services:
       # This prevents re-downloading 'sentence-transformers' every time.
       - ~/.cache/huggingface:/root/.cache/huggingface
       
-      # 3. CACHING: Map Ultralytics cache (Fonts/Config)
-      - ~/.config/Ultralytics:/root/.config/Ultralytics
+      # 3. Ultralytics mount disabled so local corrupt config/model does not leak into container
+      # - ~/.config/Ultralytics:/root/.config/Ultralytics
       
     env_file:
       - .env
