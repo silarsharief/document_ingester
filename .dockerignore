@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.git
+.gitignore
+data/chroma_db
+data/input
+data/crops
+pipeline_report.pdf
+full_analysis.pdf

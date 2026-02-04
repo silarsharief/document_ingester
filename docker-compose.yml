@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  quicksight-ai:
+    build: .
+    container_name: quicksight_swarm
+    ports:
+      - "8501:8501"
+    volumes:
+      # 1. PERSISTENCE: Save PDFs and Database to your local folder
+      - ./data:/app/data
+      
+      # 2. CACHING: Map local Hugging Face cache to container
+      # This prevents re-downloading 'sentence-transformers' every time.
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      
+      # 3. CACHING: Map Ultralytics cache (Fonts/Config)
+      - ~/.config/Ultralytics:/root/.config/Ultralytics
+      
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Tell Hugging Face to use the mounted cache directory
+      - HF_HOME=/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    restart: unless-stopped
+
