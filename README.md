@@ -1,14 +1,14 @@
-<img width="2816" height="1536" alt="Gemini_Generated_Image_88mota88mota88mo" src="https://github.com/user-attachments/assets/670aad89-22ab-4de2-aaca-dbabe5d4dce0" /># QuickSight AI: Neuro-Symbolic Multi-Agent RAG
+QuickSight AI: Neuro-Symbolic Multi-Agent RAG
 
 **QuickSight AI** is a local Retrieval-Augmented Generation (RAG) system designed to process complex PDF documents containing charts, diagrams, and tables. Unlike standard text-only RAG, this system employs a **Neuro-Symbolic architecture** that treats visual elements as first-class citizens, using Computer Vision (YOLO) and Multi-Agent Orchestration to answer questions based on both text and visual evidence.
-<img width="1648" height="1000" alt="Screenshot 2026-02-05 at 5 41 09 AM" src="https://github.com/user-attachments/assets/21994d72-bb10-43eb-9784-2f35dedc01a8" />
+<img width="800" height="488" alt="Screenshot 2026-02-05 at 5 41 09 AM" src="https://github.com/user-attachments/assets/21994d72-bb10-43eb-9784-2f35dedc01a8" />
 
 ---
 
 ## 🏗️ Architecture & Pipeline
 
 The system operates in three distinct phases: Ingestion, Retrieval, and Generation.
-<img width="2816" height="1536" alt="Gemini_Generated_Image_aw3e7faw3e7faw3e" src="https://github.com/user-attachments/assets/94927059-e8ea-4d2c-b4fe-acc337c36064" />
+<img width="700" height="320" alt="Gemini_Generated_Image_aw3e7faw3e7faw3e" src="https://github.com/user-attachments/assets/94927059-e8ea-4d2c-b4fe-acc337c36064" />
 
 ### 1. Ingestion Layer (The "Eyes")
 
@@ -31,7 +31,7 @@ The ingestion pipeline processes raw PDFs into a semantic index. It runs two par
 
 
 ### 2. Retrieval Layer (The "Filter")
-<img width="2816" height="1536" alt="Gemini_Generated_Image_88mota88mota88mo" src="https://github.com/user-attachments/assets/8293dd38-270d-45ef-930a-0efdf0ea5fe2" />
+<img width="700" height="320" alt="Gemini_Generated_Image_88mota88mota88mo" src="https://github.com/user-attachments/assets/8293dd38-270d-45ef-930a-0efdf0ea5fe2" />
 
 When a user asks a question, the system performs a multi-stage search:
 
